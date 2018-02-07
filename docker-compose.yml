@@ -1,14 +1,21 @@
 version: "3.3"
 
 networks:
-  net:
-    driver: overlay
-    attachable: true
+  #net:
+    #driver: overlay
+    #attachable: true
+  mon:
+    external: true
+  dmz-mon:
+    external: true
 
 volumes:
-    prometheus: {}
-    grafana: {}
-    alertmanager: {}
+    data-mon-prometheus:
+      external: true
+    data-mon-grafana:
+      external: true
+    data-mon-alertmanager:
+      external: true
 
 configs:
   caddy_config:
@@ -24,7 +31,7 @@ services:
   dockerd-exporter:
     image: stefanprodan/caddy
     networks:
-      - net
+      - mon
     environment:
       - DOCKER_GWBRIDGE_IP=172.18.0.1
     configs:
@@ -41,7 +48,7 @@ services:
   cadvisor:
     image: google/cadvisor
     networks:
-      - net
+      - mon
     command: -logtostderr -docker_only
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -60,12 +67,13 @@ services:
   grafana:
     image: stefanprodan/swarmprom-grafana:4.6.0
     networks:
-      - net
+      - mon
+      - dmz-mon
     environment:
       - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-localhost}
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-/}
       - GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
       - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-grafana@test.com}
       - GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Grafana}
@@ -73,13 +81,13 @@ services:
       - GF_SMTP_USER=${GF_SMTP_USER}
       - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
     volumes:
-      - grafana:/var/lib/grafana
+      - data-mon-grafana:/var/lib/grafana
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.role == manager
+          - node.hostname == sabaki
       resources:
         limits:
           memory: 128M
@@ -89,7 +97,7 @@ services:
   alertmanager:
     image: stefanprodan/swarmprom-alertmanager:v0.9.1
     networks:
-      - net
+      - mon
     environment:
       - SLACK_URL=${SLACK_URL:-https://hooks.slack.com/services/TOKEN}
       - SLACK_CHANNEL=${SLACK_CHANNEL:-general}
@@ -98,13 +106,13 @@ services:
       - '-config.file=/etc/alertmanager/alertmanager.yml'
       - '-storage.path=/alertmanager'
     volumes:
-      - alertmanager:/alertmanager
+      - data-mon-alertmanager:/alertmanager
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.role == manager
+          - node.hostname == sabaki
       resources:
         limits:
           memory: 128M
@@ -114,17 +122,20 @@ services:
   unsee:
     image: cloudflare/unsee:v0.8.0
     networks:
-      - net
+      - mon
     environment:
       - "ALERTMANAGER_URIS=default:http://alertmanager:9093"
     deploy:
       mode: replicated
       replicas: 1
+      placement:
+        constraints:
+          - node.hostname == sabaki
 
   node-exporter:
     image: stefanprodan/swarmprom-node-exporter:v0.14.0
     networks:
-      - net
+      - mon
     environment:
       - NODE_ID={{.Node.ID}}
     volumes:
@@ -149,7 +160,7 @@ services:
   prometheus:
     image: stefanprodan/swarmprom-prometheus:v1.8.2
     networks:
-      - net
+      - mon
     command:
       - '-config.file=/etc/prometheus/prometheus.yml'
       - '-storage.local.path=/prometheus'
@@ -159,7 +170,7 @@ services:
       - '-storage.local.retention=24h'
       - '-alertmanager.url=http://alertmanager:9093'
     volumes:
-      - prometheus:/prometheus
+      - data-mon-prometheus:/prometheus
     configs:
       - source: node_rules
         target: /etc/prometheus/swarm_node.rules
@@ -170,7 +181,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.role == manager
+          - node.hostname == sabaki
       resources:
         limits:
           memory: 2048M
@@ -185,7 +196,7 @@ services:
       - "9093:9093"
       - "9094:9094"
     networks:
-      - net
+      - mon
     environment:
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
@@ -197,7 +208,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.role == manager
+          - node.hostname == sabaki
       resources:
         limits:
           memory: 128M
